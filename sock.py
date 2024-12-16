@@ -9,12 +9,13 @@ from collections import deque
 from pydub import AudioSegment, playback
 import tempfile
 
+
 import threading
 
 
-def play_sound_async():
+def play_sound_async(s):
     def play():
-        playback.play(sound)
+        playback.play(s)
 
     # Uruchamiamy odtwarzanie dźwięku w nowym wątku
     thread = threading.Thread(target=play, daemon=True)
@@ -22,7 +23,9 @@ def play_sound_async():
 
 
 tempfile.tempdir = "temp2"
-sound = AudioSegment.from_file("snare.wav", format="wav")
+snare = AudioSegment.from_file("snare.wav", format="wav")
+hihat = AudioSegment.from_file("hihat.wav", format="wav")
+perc = AudioSegment.from_file("perc.wav", format="wav")
 
 cube_vertices = [
     [-1, -1, -1],
@@ -113,7 +116,7 @@ def start_client():
         # client_socket.connect((host, port))
         addr = ("192.168.1.14", 8080)
         client_socket.sendto("chuj\n".encode("utf-8"), addr)
-        # print(f"Połączono z serwerem {host}:{port}")
+        print(f"Połączono z serwerem {host}:{port}")
         m = MadgwickAHRS()
         last_angle = 0
 
@@ -132,16 +135,32 @@ def start_client():
             mag, acc, gyr, time = clear_data(data.decode("utf-8"))
 
             m.samplePeriod = time - lastTime
+            # period = time - lastTime
             lastTime = time
-            # m.update(gyr, acc, mag)
-            m.update_imu(gyr, acc)
+            m.update(gyr, acc, mag)
+            # m.update_imu(gyr, acc)
 
             angle_x, angle_y, angle_z = m.quaternion.to_euler_angles()
-            print(f"y: {angle_y}, gyr: {gyr[1]}")
 
-            if gyr_flag and gyr[1] > gyr_tresh and angle_y <= 0:
+            
+
+            # angle_x -= gyr[0] * period
+            # angle_y -= gyr[1] * period
+            # angle_z -= gyr[2] * period
+
+
+
+            print(f"x: {angle_x},y: {angle_y},z: {angle_z}, gyr: {gyr[1]}")
+
+            if gyr_flag and gyr[1] > gyr_tresh :
                 gyr_flag = False
-                play_sound_async()
+                if angle_z > 1:
+                    play_sound_async(hihat)
+                elif angle_z < -1:
+                    play_sound_async(snare)
+                else:
+                    play_sound_async(perc)
+
             if not gyr_flag and gyr[1] <= gyr_tresh:
                 gyr_flag = True
 
@@ -149,8 +168,8 @@ def start_client():
             last_accel = acc[1]
             last_gyro = gyr[1]
 
-            # if random.randint(0, 200) == 0:
-            #     print(f"x:{angle_x * np.pi};y:{angle_y * np.pi};z:{angle_z * np.pi}")
+            if random.randint(0, 200) == 0:
+                print(f"x:{angle_x * np.pi};y:{angle_y * np.pi};z:{angle_z * np.pi}")
 
             R = m.quaternion.quaternion_to_rotation_matrix()
             # Rotate and project cube vertices
