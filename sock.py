@@ -4,16 +4,35 @@ import numpy as np
 from madgwick_py.madgwickahrs import MadgwickAHRS
 import pygame
 import time
+import random
+from collections import deque
+from pydub import AudioSegment, playback
+import tempfile
+
+import threading
+
+
+def play_sound_async():
+    def play():
+        playback.play(sound)
+
+    # Uruchamiamy odtwarzanie dźwięku w nowym wątku
+    thread = threading.Thread(target=play, daemon=True)
+    thread.start()
+
+
+tempfile.tempdir = "temp2"
+sound = AudioSegment.from_file("snare.wav", format="wav")
 
 cube_vertices = [
-    [-1, -3, -1],
-    [1, -3, -1],
-    [1, 3, -1],
-    [-1, 3, -1],
-    [-1, -3, 1],
-    [1, -3, 1],
-    [1, 3, 1],
-    [-1, 3, 1],
+    [-1, -1, -1],
+    [1, -1, -1],
+    [1, 1, -1],
+    [-1, 1, -1],
+    [-1, -1, 1],
+    [1, -1, 1],
+    [1, 1, 1],
+    [-1, 1, 1],
 ]
 cube_vertices = np.array(cube_vertices)
 
@@ -33,6 +52,26 @@ edges = [
     (3, 7),  # Connecting edges
 ]
 
+cd = ""
+
+
+def draw_axes(screen, R, width, height, scale=100):
+    axes = [
+        [0, 0, 0],
+        [1, 0, 0],
+        [0, 1, 0],
+        [0, 0, 1],
+    ]
+    rotated_axes = rotate_points(axes, R)
+    projected_axes = project_points(rotated_axes, width, height, scale)
+
+    # Draw X axis (red)
+    pygame.draw.line(screen, (255, 0, 0), projected_axes[0], projected_axes[1], 2)
+    # Draw Y axis (green)
+    pygame.draw.line(screen, (0, 255, 0), projected_axes[0], projected_axes[2], 2)
+    # Draw Z axis (blue)
+    pygame.draw.line(screen, (0, 0, 255), projected_axes[0], projected_axes[3], 2)
+
 
 def clear_data(row: str):
     row = row.replace(" ", "")
@@ -40,6 +79,7 @@ def clear_data(row: str):
     mag = np.asarray(row[:3])
     acc = np.asarray(row[3:6])
     gyr = np.asarray(row[6:9])
+
     time = row[-1]
 
     return mag, acc, gyr, time
@@ -69,19 +109,48 @@ def start_client():
     pygame.display.set_caption("Quaternion Rotation Visualization")
 
     # Tworzenie gniazda klienta
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as client_socket:
-        client_socket.connect((host, port))
-        print(f"Połączono z serwerem {host}:{port}")
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as client_socket:
+        # client_socket.connect((host, port))
+        addr = ("192.168.1.14", 8080)
+        client_socket.sendto("chuj\n".encode("utf-8"), addr)
+        # print(f"Połączono z serwerem {host}:{port}")
         m = MadgwickAHRS()
+        last_angle = 0
+
+        angle_x, angle_y, angle_z = 0, 0, 0
+
+        last_gyro = 0
+        last_accel = 0
         data = client_socket.recv(195)  # Odbieranie odpowiedzi
         _, _, _, lastTime = clear_data(data.decode("utf-8"))
+        last_accel
+        gyr_flag = True
+        gyr_tresh = 10
         while True:
-            data = client_socket.recv(195)  # Odbieranie odpowiedzi
+            data, _ = client_socket.recvfrom(195)  # Odbieranie odpowiedzi
+
             mag, acc, gyr, time = clear_data(data.decode("utf-8"))
-            print(time - lastTime)
+
             m.samplePeriod = time - lastTime
             lastTime = time
-            m.update(gyr, acc, mag)
+            # m.update(gyr, acc, mag)
+            m.update_imu(gyr, acc)
+
+            angle_x, angle_y, angle_z = m.quaternion.to_euler_angles()
+            print(f"y: {angle_y}, gyr: {gyr[1]}")
+
+            if gyr_flag and gyr[1] > gyr_tresh and angle_y <= 0:
+                gyr_flag = False
+                play_sound_async()
+            if not gyr_flag and gyr[1] <= gyr_tresh:
+                gyr_flag = True
+
+            last_angle = angle_y
+            last_accel = acc[1]
+            last_gyro = gyr[1]
+
+            # if random.randint(0, 200) == 0:
+            #     print(f"x:{angle_x * np.pi};y:{angle_y * np.pi};z:{angle_z * np.pi}")
 
             R = m.quaternion.quaternion_to_rotation_matrix()
             # Rotate and project cube vertices
@@ -90,6 +159,7 @@ def start_client():
 
             # Clear screen
             screen.fill((0, 0, 0))
+            draw_axes(screen, R, width, height)
 
             # Draw edges
             for edge in edges:
