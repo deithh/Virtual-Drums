@@ -8,7 +8,7 @@ import random
 from collections import deque
 from pydub import AudioSegment, playback
 import tempfile
-
+from scipy.spatial.transform import Rotation
 
 import threading
 
@@ -136,8 +136,8 @@ def start_client():
 
             m.samplePeriod = time - lastTime
             # period = time - lastTime
-            lastTime = time
             m.update(gyr, acc, mag)
+            lastTime = time
             # m.update_imu(gyr, acc)
 
             angle_x, angle_y, angle_z = m.quaternion.to_euler_angles()
@@ -149,14 +149,15 @@ def start_client():
             # angle_z -= gyr[2] * period
 
 
+            # print(f"x: {angle_x}, y: {angle_y},z: {angle_z}, gyr: {gyr[1]}")
 
-            print(f"x: {angle_x},y: {angle_y},z: {angle_z}, gyr: {gyr[1]}")
 
             if gyr_flag and gyr[1] > gyr_tresh :
                 gyr_flag = False
-                if angle_z > 1:
+
+                if angle_z > 0.5:
                     play_sound_async(hihat)
-                elif angle_z < -1:
+                elif angle_z < -0.5:
                     play_sound_async(snare)
                 else:
                     play_sound_async(perc)
@@ -168,10 +169,13 @@ def start_client():
             last_accel = acc[1]
             last_gyro = gyr[1]
 
-            if random.randint(0, 200) == 0:
-                print(f"x:{angle_x * np.pi};y:{angle_y * np.pi};z:{angle_z * np.pi}")
+            # if random.randint(0, 200) == 0:
+            #     print(f"x:{angle_x * np.pi};y:{angle_y * np.pi};z:{angle_z * np.pi}")
 
             R = m.quaternion.quaternion_to_rotation_matrix()
+
+            angles = Rotation.from_matrix(R).as_euler('xyz', degrees=True)
+            print(angles)
             # Rotate and project cube vertices
             rotated_vertices = rotate_points(cube_vertices, R)
             projected_vertices = project_points(rotated_vertices, width, height)
