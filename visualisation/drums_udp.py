@@ -15,16 +15,22 @@ import threading
 
 import numpy as np
 
+
 snare = AudioSegment.from_file("../assets/snare.wav", format="wav")
-hihat = AudioSegment.from_file("../assets/snare.wav", format="wav")
-perc = AudioSegment.from_file("../assets/snare.wav", format="wav")
+hihat = AudioSegment.from_file("../assets/klask.wav", format="wav")
+perc = AudioSegment.from_file("../assets/perc.wav", format="wav")
 width, height = 800, 600
+
+import os
+import sys
+from contextlib import redirect_stdout, redirect_stderr
 
 
 def play_sound_async(s):
     def play():
         playback.play(s)
 
+    # Create and start the daemon thread
     thread = threading.Thread(target=play, daemon=True)
     thread.start()
 
@@ -112,6 +118,15 @@ def draw_all(screen, R):
     pygame.display.flip()
 
 
+def pseudomodulo(val, base):
+    temp = val - base
+    if temp < -180:
+        return temp + 360
+    if temp > 180:
+        return temp - 360
+    return temp
+
+
 def start_client(host="192.168.1.14", port=8080):
 
     screen = init_pygame()
@@ -129,10 +144,11 @@ def start_client(host="192.168.1.14", port=8080):
         gyr_tresh = 10
         gyr_flag = True
 
-        m = ahrs.filters.Madgwick(gain=0.05, gain_marg=0.05)
+        m = ahrs.filters.Madgwick(gain=0.033)
         # get inital position
         data = client_socket.recv(195)
         mag, acc, gyr, time = clear_data(data.decode("utf-8"))
+        lastTime = time
         q = np.array([1, 0, 0, 0], dtype=np.float64)
         for _ in range(5000):
             q = m.updateMARG(q, gyr, acc, mag)
@@ -141,28 +157,56 @@ def start_client(host="192.168.1.14", port=8080):
             data, _ = client_socket.recvfrom(195)
 
             mag, acc, gyr, time = clear_data(data.decode("utf-8"))
+            deltaTime = time - lastTime
+            # print(deltaTime)
+            lastTime = time
+            m.Dt = deltaTime  # wywalić jak przestanie działać
             q = m.updateMARG(q, gyr, acc, mag)
-            R = quaternion_to_rotation_matrix(q)
+            rotation = Rotation.from_quat(q, scalar_first=True)
+            R = rotation.as_matrix()
+            angle_x, angle_y, angle_z = rotation.as_euler("xyz", degrees=True)
 
-            if gyr_flag and gyr[1] > gyr_tresh:
+            angle_tresh = 600
+            angle_z_base = 80
+            angle_diff = (angle_y - last_angle) / deltaTime
+            shifted = pseudomodulo(angle_z, angle_z_base)
+            # print(f"ad:{angle_diff}     y:{angle_y}")
+            # print(f"z:{shifted}    y:{angle_y}")
+            if gyr_flag and angle_diff > angle_tresh and angle_y > -90 and angle_y < 30:
+                print(f"z:{shifted}    y:{angle_y}")
                 gyr_flag = False
 
-                if angle_z > 0.5:
-                    play_sound_async(hihat)
-                elif angle_z < -0.5:
-                    play_sound_async(snare)
+                if angle_y < -50:
+                    if shifted > 30 and shifted < 90:
+                        print(1)
+                        play_sound_async(hihat)
+                    if shifted < -30 and shifted > -90:
+                        print(2)
+                        play_sound_async(hihat)
                 else:
-                    play_sound_async(perc)
+                    if shifted > -135 and shifted < -45:
+                        print(3)
+                        play_sound_async(snare)
+                    elif shifted >= -45 and shifted < 0:
+                        print(4)
+                        play_sound_async(perc)
+                    elif shifted >= 0 and shifted < 45:
+                        print(5)
+                        play_sound_async(perc)
+                    elif shifted >= 45 and shifted < 135:
+                        print(6)
+                        play_sound_async(snare)
 
-            if not gyr_flag and gyr[1] <= gyr_tresh:
+            if not gyr_flag and angle_diff <= angle_tresh:
                 gyr_flag = True
 
+            last_angle = angle_y
+
             angles = Rotation.from_matrix(R).as_euler("xyz", degrees=True)
-            print(angles)
 
             draw_all(screen, R)
 
 
 if __name__ == "__main__":
-    tempfile.tempdir = "temp2"
+    tempfile.tempdir = "../temp2"
     start_client()
