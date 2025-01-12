@@ -23,34 +23,45 @@ dub_hello = AudioSegment.from_file("../assets/hello.mp3")
 
 
 def start_drums_agent(stick):
+    """
+    function that run drums agent on stick. Orientation calculation with Madgwick filter
+    """
+
+    # initialize mixer and sounds
     pygame.mixer.init(44100, -16, 2)
     print(f"Stick {stick} initializing, mixer settings: {pygame.mixer.get_init()}")
-
 
     lowerInnerDrum = pygame.mixer.Sound(dub_lowerInnerDrum.raw_data)
     upperRightDrum = pygame.mixer.Sound(dub_upperRightDrum.raw_data)
     lowerOuterDrum = pygame.mixer.Sound(dub_lowerOuterDrum.raw_data)
     upperLeftDrum = pygame.mixer.Sound(dub_upperLeftDrum.raw_data)
-    
-    last_angle, angle_y, angle_z = 0, 0, 0
-    gyr_flag = True
 
+    last_angle = 0
+    angle_y, angle_z = 0, 0
+    gyr_flag = True
+    angle_tresh = 600
+
+    # initialize Madgwick filter
     m = ahrs.filters.Madgwick(gain=0.033)
 
     acc, gyr, mag = stick.get_calibrated()
- 
-    lastTime = time.time()
+
+    # warm up filter with 5000 samples for initial orientation.
     q = np.array([1, 0, 0, 0], dtype=np.float64)
-    
     for _ in range(5000):
         q = m.updateMARG(q, gyr, acc, mag)
 
     rotation = Rotation.from_quat(np.roll(q, -1))
 
     _, _, angle_z = rotation.as_euler("xyz", degrees=True)
-    angle_z_base = angle_z
 
+    # get base angle for yaw axis
+    angle_z_base = angle_z
     print(f"Stick {stick}: Calibration done")
+
+    lastTime = time.time()
+
+    # main loop
     while True:
 
         acc, gyr, mag = stick.get_calibrated()
@@ -58,16 +69,18 @@ def start_drums_agent(stick):
         deltaTime = time_temp - lastTime
 
         lastTime = time_temp
-        m.Dt = deltaTime  
+        # assing corect delta time to filter
+        m.Dt = deltaTime
         q = m.updateMARG(q, gyr, acc, mag)
         rotation = Rotation.from_quat(np.roll(q, -1))
         _, angle_y, angle_z = rotation.as_euler("xyz", degrees=True)
 
-        angle_tresh = 600
+        # calculate change of the angle angle in time
         angle_diff = (angle_y - last_angle) / deltaTime
+        # shift angle to be in range -180, 180, 0 in middle of calibration
         shifted = pseudomodulo(angle_z, angle_z_base)
 
-
+        # if hit is detected play sound based on yaw and pitch angle.
         if gyr_flag and angle_diff > angle_tresh and angle_y > -90 and angle_y < 30:
 
             gyr_flag = False
@@ -92,6 +105,7 @@ def start_drums_agent(stick):
                     print(f"Stick {stick}: Lower outer left drum")
                     play_sound(lowerOuterDrum)
 
+        # if hit is detected set flag to true/ dont allow multiple hits in short time
         if not gyr_flag and angle_diff <= angle_tresh:
             gyr_flag = True
 
@@ -101,6 +115,7 @@ def start_drums_agent(stick):
 def play_sound(s):
     s.play()
 
+
 def pseudomodulo(val, base):
     temp = val - base
     if temp < -180:
@@ -109,7 +124,15 @@ def pseudomodulo(val, base):
         return temp - 360
     return temp
 
-def button(BUTTON_GPIO = 17):
+
+def button(BUTTON_GPIO=17):
+    """
+    Function that listens for button presses and plays a sound when the button is pressed.
+    Sound only will fire iw button is pressed last time earlier than time_tresh
+    for purpose of minimaze jittering
+    """
+
+    # initialize button sound and mixer
     pygame.mixer.init(44100, -16, 2)
     buttonDrum = pygame.mixer.Sound(dub_buttonDrum.raw_data)
     last_push = time.time()
@@ -118,15 +141,16 @@ def button(BUTTON_GPIO = 17):
     GPIO.setmode(GPIO.BCM)
     GPIO.setup(BUTTON_GPIO, GPIO.IN, pull_up_down=GPIO.PUD_UP)
 
+    # wait for button press and play sound if time_tresh is passed
     while True:
         GPIO.wait_for_edge(BUTTON_GPIO, GPIO.FALLING)
         time_pushed = time.time()
         dt = time_pushed - last_push
-        if(dt > time_tresh):
+        if dt > time_tresh:
             last_push = time_pushed
             print("Button pressed!")
             play_sound(buttonDrum)
-            
+
         GPIO.wait_for_edge(BUTTON_GPIO, GPIO.RISING)
 
 
@@ -136,20 +160,21 @@ if __name__ == "__main__":
     play_sound(hello)
 
     try:
-        # Button
+        # spawn Button
         thread = threading.Thread(target=button, daemon=True)
         thread.start()
 
-        # Stick 1
+        # spawn Stick 1
         i2c1 = I2C(3)
         stick1 = Sensor(i2c1, 1)
         stick1.set_range_8g_2000dps()
         stick1.set_rate_208()
-        thread = threading.Thread(target=(lambda : start_drums_agent(stick1)), daemon=True)
+        thread = threading.Thread(
+            target=(lambda: start_drums_agent(stick1)), daemon=True
+        )
         thread.start()
 
-
-        # Stick 2
+        # continue as Stick 2
         i2c = busio.I2C(board.SCL, board.SDA)
         stick = Sensor(i2c, 2)
         stick.set_range_8g_2000dps()
