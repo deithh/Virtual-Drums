@@ -1,13 +1,18 @@
 import numpy as np
 
-SIM = np.array(
-    [[0.996, -0.005, -0.005], [-0.005, 0.998, 0.042], [-0.005, 0.042, 1.007]]
+SIM1 = np.array(
+    [[0.999, 0.007, -0.001], [-0.007, 0.998, 0.026], [-0.001, 0.026, 1.004]]
 )
 
-HIM = np.array([6.47, 8.8, -91.88])
+HIM1 = np.array([8.59, 8.74, -96.99])
 
+SIM2 = np.array(
+    [[0.999, -0.003, 0.006], [-0.003, 1.005, 0.029], [0.006, 0.029, 0.997]]
+)
 
-def magnetic_calibration(uncalibrated, soft_iron_matrix=SIM, hard_iron_offset=HIM):
+HIM2 = np.array([35.30, 12.35, -75.46])
+
+def magnetic_calibration(uncalibrated, stick_id):
     """
     Calibrates a magnetic vector using the soft iron matrix and hard iron offset.
 
@@ -19,11 +24,15 @@ def magnetic_calibration(uncalibrated, soft_iron_matrix=SIM, hard_iron_offset=HI
     Returns:
         numpy.ndarray: Calibrated magnetic vector (1D array of length 3).
     """
+
+    soft_iron_matrix = SIM1 if stick_id == 1 else SIM2
+    hard_iron_offset = HIM1 if stick_id == 1 else HIM2
+
     return np.dot(soft_iron_matrix, uncalibrated - hard_iron_offset)
 
 
-def gyro_calibration(uncalibrated):
-    return uncalibrated
+def gyro_calibration(uncalibrated, HIG):
+    return uncalibrated - HIG 
 
 
 def acc_calibration(uncalibrated):
